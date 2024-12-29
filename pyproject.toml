@@ -9,6 +9,8 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.10"
 
+[tool.poetry.scripts]
+main = "watchtower.__main__:main"
 
 [build-system]
 requires = ["poetry-core"]
