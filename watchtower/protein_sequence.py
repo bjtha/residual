@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 @dataclass
-class SequenceRecord:
+class ProteinSequence:
 
     """
     Holds the sequence and accumulated analysis data.

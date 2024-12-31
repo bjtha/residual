@@ -1,5 +1,8 @@
 from collections.abc import Iterable
 from functools import singledispatchmethod
+from typing import Union
+
+from watchtower.protein_sequence import ProteinSequence
 
 DEFAULT_PARAMS = {}
 
@@ -10,6 +13,7 @@ class Watchtower:
 
     def __init__(self, params: dict = None) -> None:
 
+        self.sequences = dict()
         self.output = 'normal'
 
         if params is None:
@@ -25,13 +29,36 @@ class Watchtower:
 
             setattr(self, key, value)
 
+    SequenceInputType = Union[str, Iterable]
+
     @singledispatchmethod
-    def load_seqs(self, seqs):
+    def load_seqs(self, __seqs: SequenceInputType, /):
         raise ValueError("Sequences must be given as a file path or an iterable of strings")
 
     @load_seqs.register
-    def _(self, seqs: str):
-        print('Attempting to load sequences from a filepath...')
+    def _(self, seqs: str) -> None:
+
+        """
+        Import sequences from a fasta-formatted file.
+
+        :param seqs: path to file.
+        """
+
+        with open(seqs, "r") as file:
+            lines = [line.strip() for line in file.readlines()][::-1]
+
+        seq_lines = []
+
+        for line in lines:
+            if line.startswith('>'):
+                name = line.lstrip('>')
+                sequence = ''.join(seq_lines)
+                self.sequences[name] = ProteinSequence(name, sequence)
+                seq_lines = []
+
+            else:
+                seq_lines.insert(0, line)
+
 
     @load_seqs.register
     def _(self, seqs: Iterable):
