@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from itertools import count
 from functools import singledispatchmethod
 from typing import Union
 
@@ -29,23 +30,38 @@ class Watchtower:
 
             setattr(self, key, value)
 
-    SequenceInputType = Union[str, Iterable]
+    SequenceInputType = Union[str, Iterable[str]]
 
     @singledispatchmethod
-    def load_seqs(self, __seqs: SequenceInputType, /):
+    def load_seqs(self,
+                  __seqs: SequenceInputType,
+                  /, *,
+                  names: Iterable[str] | None = None,
+                  overwrite: bool = True,
+                  ) -> None:
+
         raise ValueError("Sequences must be given as a file path or an iterable of strings")
 
     @load_seqs.register
-    def _(self, seqs: str) -> None:
+    def _(self,
+          __seqs: str,
+          /, *,
+          names: Iterable[str] | None = None,
+          overwrite: bool = True,
+          ) -> None:
 
         """
         Import sequences from a fasta-formatted file.
 
-        :param seqs: path to file.
+        :param __seqs: path to file.
+        :param overwrite: whether to replace any currently loaded sequences.
         """
 
-        with open(seqs, "r") as file:
+        with open(__seqs, "r") as file:
             lines = [line.strip() for line in file.readlines()][::-1]
+
+        if overwrite:
+            self.sequences = {}
 
         seq_lines = []
 
@@ -59,15 +75,30 @@ class Watchtower:
             else:
                 seq_lines.insert(0, line)
 
+        print(f'{len(self.sequences)} total sequences loaded.')
+
 
     @load_seqs.register
-    def _(self, seqs: Iterable):
-        print('Attempting to load sequences from an iterable...')
+    def _(self,
+          __seqs: Iterable,
+          /, *,
+          names: Iterable[str] | None = None,
+          overwrite: bool = True,
+          ) -> None:
 
+        if overwrite:
+            self.sequences = {}
 
-if __name__ == '__main__':
+        if names:
+            try:
+                name_seq_pairs = list(zip(names, __seqs, strict=True))
+            except ValueError:
+                raise ValueError('Number of names and sequences must be equal.')
 
-    watch = Watchtower()
-    watch.load_seqs("filepath")
-    watch.load_seqs(['A', 'B', 'C'])
-    watch.load_seqs(str(i) for i in range(5))
+        else:
+            name_seq_pairs = zip((f'sequence_{i:03}' for i in count(1)), __seqs)
+
+        for name, sequence in name_seq_pairs:
+            self.sequences[name] = ProteinSequence(name, sequence)
+
+        print(f'{len(self.sequences)} total sequences loaded.')

@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 
+from watchtower.utils import validate_aa_sequence
+
 @dataclass
 class ProteinSequence:
 
@@ -12,9 +14,4 @@ class ProteinSequence:
     metadata: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-
-        sequence = set(self.sequence)
-        allowed = set('ACDEFGHIKLMNPQRSTVWY')  # Valid amino acid symbols
-
-        if disallowed := (sequence - allowed):
-            raise ValueError(f'Invalid sequence characters: {" ".join(str(i) for i in disallowed)}')
+        validate_aa_sequence(self.sequence)
