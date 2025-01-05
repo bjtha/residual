@@ -18,7 +18,7 @@ def main():
 
     wt = Watchtower()
     wt.load_seqs(seq_input, names=args.names)
-
+    wt.run()
 
 def parse_sequence_input(seq_input: str) -> list[str] | str:
     """

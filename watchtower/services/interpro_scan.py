@@ -1,19 +1,23 @@
+import asyncio
 import json
 import os
 import requests
-from time import sleep, time
+from time import sleep
 from typing import Iterable
 import xml.etree.ElementTree as ET
 
 from watchtower.protein_sequence import ProteinSequence
 from watchtower.services.base_class import Service
 from watchtower.utils import url_maker
+from watchtower.watchtower import register_service
 
 USER_EMAIL = os.getenv('USER_EMAIL')
 
+@register_service
 class InterProScan(Service):
 
     base_url = 'https://www.ebi.ac.uk/Tools/services/rest/iprscan5'
+    max_jobs = 2
 
     def __init__(self, user_email: str):
         super().__init__()
@@ -23,34 +27,6 @@ class InterProScan(Service):
 
     def name(self) -> str:
         return 'ips5'
-
-    def run(self, inputs: Iterable[ProteinSequence]) -> list[ProteinSequence]:
-
-        sequences = iter(inputs)
-
-        # Set up a dictionary for sequence-job mapping
-
-        # Establish the max number of concurrent
-
-        # i = 0
-        # j = max_jobs
-
-        # while done < len(sequences):
-            # for sequence in sequences[i:j]:
-                # send sequences for analysis
-                # collect job_id, map it to the sequence object ( {job_id: ProteinSequence} )
-            # for job_id in the mapping:
-                # wait for the job is complete
-                # assign the results to a results dictionary
-                # increment the 'done' counter
-            # set up the next bracket by updating i and j
-
-        data = {self.name: {}}
-
-        for sequence in inputs:
-            sequence.metadata.update(data)
-
-        return list(inputs)
 
     def _submit_sequence(self, seq: ProteinSequence, **params) -> str:
 
@@ -93,7 +69,6 @@ class InterProScan(Service):
                           job_id: str,
                           check_delay: int = 10,
                           save_file: str | None = None,
-                          verbose: bool = False,
                           ) -> dict:
 
         """
@@ -102,7 +77,6 @@ class InterProScan(Service):
         :param job_id: id of the job, provided at time of submission.
         :param check_delay: how long in seconds to wait between checking job status.
         :param save_file: location to save retrieved json data. If None, does not save.
-        :param verbose: whether to print status updates while in checking loop.
         :return: dictionary containing json data.
         :raises: HTTPError if a problem with the status checking or data retrieval.
         :raises: ValueError if save filepath is not to a file ending '.json'
@@ -111,20 +85,10 @@ class InterProScan(Service):
 
         url = self.make_url('status', job_id)
 
-        start = time()
-        check_count = 0
-        status_string = ''
         while True:
             res = requests.get(url)
-            check_count += 1
             res.raise_for_status()
             status = res.text
-
-            if verbose:
-                print('\r' + ' '*len(status_string), end='')
-                elapsed = round(time()-start, 1)
-                status_string = str(check_count).ljust(5) + f'ELAPSED: {elapsed} s'.ljust(18) + status
-                print('\r' + status_string, end='')
 
             if status != 'FINISHED':
                 sleep(check_delay)
@@ -183,6 +147,48 @@ class InterProScan(Service):
         seq.metadata[self.name()] = result
 
 
+    async def _scan_sequence(self, seq: ProteinSequence, semaphore: asyncio.Semaphore) -> None:
+
+        """
+        Query the InterProScan with a sequence, collect the results and write the data
+        to the sequence object.
+
+        :param seq: ProteinSequence to be scanned.
+        :param semaphore:
+        :return:
+        """
+
+        async with semaphore:
+            job_id = self._submit_sequence(seq)
+            data = self._retrieve_results(job_id)
+            self._apply_data(seq, data)
+
+
+    async def _dispatch_jobs(self, sequences: Iterable[ProteinSequence]):
+
+        """
+        :param sequences:
+        :return:
+        """
+
+        semaphore = asyncio.Semaphore(self.max_jobs)
+
+        jobs = []
+
+        for seq in sequences:
+            jobs.append(asyncio.create_task(self._scan_sequence(seq, semaphore)))
+
+        await asyncio.gather(*jobs)
+
+
+    def run(self, inputs: Iterable[ProteinSequence]) -> list[ProteinSequence]:
+
+        sequences = iter(inputs)
+        asyncio.run(self._dispatch_jobs(sequences))
+
+        return list(sequences)
+
+
 if __name__ == '__main__':
     ips = InterProScan(USER_EMAIL)
 
@@ -194,8 +200,3 @@ if __name__ == '__main__':
     'GTLEAIQWTKHWDSGI'
                           )
 
-    job = ips._submit_sequence(test_seq)
-    job_data = ips._retrieve_results(job, verbose=True, save_file='./job_data.json')
-    ips._apply_data(test_seq, job_data)
-
-    print(test_seq.metadata)

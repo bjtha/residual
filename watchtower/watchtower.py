@@ -1,15 +1,17 @@
 from collections.abc import Iterable
 from itertools import count
 from functools import singledispatchmethod
-from typing import Union
+from typing import Union, TypeVar, Type
 
 from watchtower.protein_sequence import ProteinSequence
+from watchtower.services.base_class import Service
 
 DEFAULT_PARAMS = {}
+SERVICE_REGISTER = {}
 
 class Watchtower:
     """
-    In charge of running services against the given sequences and outputting the final result
+    In charge of loading in sequences and running services against them.
     """
 
     def __init__(self, params: dict = None) -> None:
@@ -94,7 +96,6 @@ class Watchtower:
                 name_seq_pairs = list(zip(names, __seqs, strict=True))
             except ValueError:
                 raise ValueError('Number of names and sequences must be equal.')
-
         else:
             name_seq_pairs = zip((f'sequence_{i:03}' for i in count(1)), __seqs)
 
@@ -102,3 +103,13 @@ class Watchtower:
             self.sequences[name] = ProteinSequence(name, sequence)
 
         print(f'{len(self.sequences)} total sequences loaded.')
+
+    def run(self) -> None:
+        for cls_name in SERVICE_REGISTER:
+            print(cls_name)
+
+S = TypeVar('S', bound=Type[Service])
+
+def register_service(cls: S) -> S:
+    SERVICE_REGISTER[cls.__name__] = cls
+    return cls
