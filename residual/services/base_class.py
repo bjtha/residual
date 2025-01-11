@@ -1,23 +1,20 @@
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 
-from watchtower.protein_sequence import ProteinSequence
+from residual.protein_sequence import ProteinSequence
 
-class Service(ABC):
-    """
-    Base class for a service provider.
-    """
+service_registry = {}
+
+def register_service(cls):
+    """Decorator for services to have them automatically detected by the Surveyor."""
+    service_registry[cls.__name__] = cls
+    return cls
+
+class ServiceBaseClass(ABC):
+    """Base class for a service provider."""
 
     def __init__(self):
-        pass
-
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """
-        Name of the service
-        :return:
-        """
+        ...
 
     @abstractmethod
     def run(self, inputs: Iterable[ProteinSequence]) -> list[ProteinSequence]:

@@ -6,15 +6,14 @@ from time import sleep
 from typing import Iterable
 import xml.etree.ElementTree as ET
 
-from watchtower.protein_sequence import ProteinSequence
-from watchtower.services.base_class import Service
-from watchtower.utils import url_maker
-from watchtower.watchtower import register_service
+from loguru import logger
 
-USER_EMAIL = os.getenv('USER_EMAIL')
+from residual.protein_sequence import ProteinSequence
+from residual.services import ServiceBaseClass, register_service
+from residual.utils import url_maker
 
 @register_service
-class InterProScan(Service):
+class InterProScan(ServiceBaseClass):
 
     base_url = 'https://www.ebi.ac.uk/Tools/services/rest/iprscan5'
     max_jobs = 2
@@ -40,7 +39,7 @@ class InterProScan(Service):
         """
 
         payload = {
-            'email': USER_EMAIL,
+            'email': self.user_email,
             'title': seq.name,
             'goterms': True,
             'pathways': False,
@@ -49,7 +48,7 @@ class InterProScan(Service):
             'sequence': seq.sequence,
         }
 
-        # Update with user-defined options to the payload if they are accepted by the API
+        # Update payload with user-defined options if they are accepted by the API
         if params:
             res = requests.get(url=self.make_url('parameters'))
             res.raise_for_status()
@@ -65,9 +64,9 @@ class InterProScan(Service):
 
         return res.text
 
-    def _retrieve_results(self,
+    async def _retrieve_results(self,
                           job_id: str,
-                          check_delay: int = 10,
+                          check_delay: int = 5,
                           save_file: str | None = None,
                           ) -> dict:
 
@@ -79,8 +78,8 @@ class InterProScan(Service):
         :param save_file: location to save retrieved json data. If None, does not save.
         :return: dictionary containing json data.
         :raises: HTTPError if a problem with the status checking or data retrieval.
-        :raises: ValueError if save filepath is not to a file ending '.json'
-        :raises: FileNotFoundError if save filepath is not valid
+        :raises: ValueError if save filepath is not to a file ending '.json'.
+        :raises: FileNotFoundError if save filepath is not valid.
         """
 
         url = self.make_url('status', job_id)
@@ -91,7 +90,7 @@ class InterProScan(Service):
             status = res.text
 
             if status != 'FINISHED':
-                sleep(check_delay)
+                await asyncio.sleep(check_delay)
             else:
                 break
 
@@ -158,11 +157,15 @@ class InterProScan(Service):
         :return:
         """
 
+        logger.info(f'{seq.name}: Waiting for semaphore...')
+
         async with semaphore:
+            logger.info(f'{seq.name}: Scanning now...')
             job_id = self._submit_sequence(seq)
-            data = self._retrieve_results(job_id)
+            data = await self._retrieve_results(job_id)
             self._apply_data(seq, data)
 
+        logger.info(f'{seq.name}: Scan finished.')
 
     async def _dispatch_jobs(self, sequences: Iterable[ProteinSequence]):
 
@@ -176,6 +179,7 @@ class InterProScan(Service):
         jobs = []
 
         for seq in sequences:
+            logger.info(f'Creating task for {seq.name}')
             jobs.append(asyncio.create_task(self._scan_sequence(seq, semaphore)))
 
         await asyncio.gather(*jobs)
@@ -183,14 +187,15 @@ class InterProScan(Service):
 
     def run(self, inputs: Iterable[ProteinSequence]) -> list[ProteinSequence]:
 
+        logger.info('Running InterProScan...')
         sequences = iter(inputs)
         asyncio.run(self._dispatch_jobs(sequences))
 
+        logger.info('InterProScan run complete')
         return list(sequences)
 
-
 if __name__ == '__main__':
-    ips = InterProScan(USER_EMAIL)
+    ips = InterProScan(os.environ['USER_EMAIL'])
 
     test_seq = ProteinSequence(name='P00334', sequence=
     'MSFTLTNKNVIFVAGLGGIGLDTSKELLKRDLKNLVILDRIENPAAIAELKAINPKVTVT'

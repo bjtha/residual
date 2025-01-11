@@ -11,6 +11,7 @@ python = "^3.10"
 pytest = "^8.3.4"
 requests = "^2.32.3"
 poetry = "^2.0.0"
+loguru = "^0.7.3"
 
 [tool.poetry.scripts]
 main = "residual.__main__:main"
