@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "watchtower"
+name = "residual"
 version = "0.1.0"
 description = "A package for gathering and collating analysis results for protein sequences."
 authors = ["bjtha <142571425+bjtha@users.noreply.github.com>"]
@@ -10,9 +10,10 @@ readme = "README.md"
 python = "^3.10"
 pytest = "^8.3.4"
 requests = "^2.32.3"
+poetry = "^2.0.0"
 
 [tool.poetry.scripts]
-main = "watchtower.__main__:main"
+main = "residual.__main__:main"
 
 [build-system]
 requires = ["poetry-core"]
