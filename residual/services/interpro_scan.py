@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import requests
-from time import sleep
 from typing import Iterable
 import xml.etree.ElementTree as ET
 
@@ -65,10 +64,10 @@ class InterProScan(ServiceBaseClass):
         return res.text
 
     async def _retrieve_results(self,
-                          job_id: str,
-                          check_delay: int = 5,
-                          save_file: str | None = None,
-                          ) -> dict:
+                                job_id: str,
+                                check_delay: int = 5,
+                                save_file: str | None = None,
+                                ) -> dict:
 
         """
         Fetch results for a job.

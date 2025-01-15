@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-ALLOWED_SYMBOLS = set('ACDEFGHIKLMNPQRSTVWY')  # valid amino acid symbols
+ALLOWED_SYMBOLS = set('ACDEFGHIKLMNPQRSTVWY')  # Valid amino acid symbols
 
 
 @dataclass

@@ -1,5 +1,5 @@
 import pytest
-from watchtower.protein_sequence import ProteinSequence
+from residual.protein_sequence import ProteinSequence
 
 def test_validation() -> None:
 
