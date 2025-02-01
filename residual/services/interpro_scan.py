@@ -1,38 +1,35 @@
 import asyncio
-import json
-import os
-import requests
+import aiohttp
 from typing import Iterable
-import xml.etree.ElementTree as ET
 
 from loguru import logger
 
 from residual.protein_sequence import ProteinSequence
 from residual.services import ServiceBaseClass, register_service
-from residual.utils import url_maker
+from residual.utils import ExtendableUrl
 
 @register_service
 class InterProScan(ServiceBaseClass):
 
-    base_url = 'https://www.ebi.ac.uk/Tools/services/rest/iprscan5'
-    max_jobs = 2
+    base_url = ExtendableUrl('https://www.ebi.ac.uk/Tools/services/rest/iprscan5')
+    max_jobs = 30
 
     def __init__(self, user_email: str):
         super().__init__()
-
         self.user_email = user_email
-        self.make_url = url_maker(self.base_url)
 
     def name(self) -> str:
         return 'ips5'
 
-    def _submit_sequence(self, seq: ProteinSequence, **params) -> str:
+    async def _submit_sequence(self,
+                               session: aiohttp.ClientSession,
+                               seq: ProteinSequence,
+                               ) -> str:
 
         """
         Sends request for a given sequence to the InterProScan API.
 
         :param seq: ProteinSequence to scan
-        :param params: keyword parameters defining options for the run. If not specified, defaults apply.
         :return: id of successfully submitted job
         :raises: HTTPError if problem with retrieving the parameter names or sending the request.
         """
@@ -43,30 +40,19 @@ class InterProScan(ServiceBaseClass):
             'goterms': True,
             'pathways': False,
             'stype': 'p',
-            'appl': None,
+            # 'appl': '',
             'sequence': seq.sequence,
         }
 
-        # Update payload with user-defined options if they are accepted by the API
-        if params:
-            res = requests.get(url=self.make_url('parameters'))
+        url = self.base_url / 'run'
+        async with session.post(str(url), data=payload) as res:
             res.raise_for_status()
-            available_parameters = [param.text for param in ET.fromstring(res.text)]  # Parsed xml result
-
-            for key, value in params.items():
-                if key in available_parameters:
-                    payload[key] = value
-
-        res = requests.post(url=self.make_url('run'),
-                            data=payload)
-        res.raise_for_status()
-
-        return res.text
+            return await res.text()
 
     async def _retrieve_results(self,
+                                session: aiohttp.ClientSession,
                                 job_id: str,
-                                check_delay: int = 5,
-                                save_file: str | None = None,
+                                check_delay: int = 1,
                                 ) -> dict:
 
         """
@@ -74,39 +60,29 @@ class InterProScan(ServiceBaseClass):
 
         :param job_id: id of the job, provided at time of submission.
         :param check_delay: how long in seconds to wait between checking job status.
-        :param save_file: location to save retrieved json data. If None, does not save.
         :return: dictionary containing json data.
         :raises: HTTPError if a problem with the status checking or data retrieval.
         :raises: ValueError if save filepath is not to a file ending '.json'.
         :raises: FileNotFoundError if save filepath is not valid.
         """
 
-        url = self.make_url('status', job_id)
+        url = self.base_url / 'status' / job_id
 
         while True:
-            res = requests.get(url)
-            res.raise_for_status()
-            status = res.text
+            async with session.get(str(url)) as res:
+                res.raise_for_status()
+                status = await res.text()
 
             if status != 'FINISHED':
                 await asyncio.sleep(check_delay)
             else:
                 break
 
-        url = self.make_url('result', job_id, 'json')
-        res = requests.get(url)
-        res.raise_for_status()
+        url = self.base_url / 'result' / job_id / 'json'
+        async with session.get(str(url)) as res:
+            res.raise_for_status()
+            return await res.json()
 
-        if save_file:
-            if not save_file.endswith('.json'):
-                raise ValueError('Must save data to a .json file.')
-
-            with open(save_file, "w") as file:
-                file.write(res.text)
-
-        result_data = json.loads(res.text)
-
-        return result_data
 
     def _apply_data(self, seq: ProteinSequence, data: dict) -> None:
 
@@ -145,7 +121,10 @@ class InterProScan(ServiceBaseClass):
         seq.metadata[self.name()] = result
 
 
-    async def _scan_sequence(self, seq: ProteinSequence, semaphore: asyncio.Semaphore) -> None:
+    async def _scan_sequence(self,
+                             seq: ProteinSequence,
+                             semaphore: asyncio.Semaphore,
+                             session: aiohttp.ClientSession) -> None:
 
         """
         Query the InterProScan with a sequence, collect the results and write the data
@@ -160,28 +139,19 @@ class InterProScan(ServiceBaseClass):
 
         async with semaphore:
             logger.info(f'{seq.name}: Scanning now...')
-            job_id = self._submit_sequence(seq)
-            data = await self._retrieve_results(job_id)
+            job_id = await self._submit_sequence(session, seq)
+            data = await self._retrieve_results(session, job_id)
             self._apply_data(seq, data)
 
         logger.info(f'{seq.name}: Scan finished.')
 
     async def _dispatch_jobs(self, sequences: Iterable[ProteinSequence]):
 
-        """
-        :param sequences:
-        :return:
-        """
-
         semaphore = asyncio.Semaphore(self.max_jobs)
 
-        jobs = []
-
-        for seq in sequences:
-            logger.info(f'Creating task for {seq.name}')
-            jobs.append(asyncio.create_task(self._scan_sequence(seq, semaphore)))
-
-        await asyncio.gather(*jobs)
+        async with aiohttp.ClientSession() as session:
+            jobs = [self._scan_sequence(seq, semaphore, session) for seq in sequences]
+            await asyncio.gather(*jobs)
 
 
     def run(self, inputs: Iterable[ProteinSequence]) -> list[ProteinSequence]:
@@ -192,15 +162,3 @@ class InterProScan(ServiceBaseClass):
 
         logger.info('InterProScan run complete')
         return list(sequences)
-
-if __name__ == '__main__':
-    ips = InterProScan(os.environ['USER_EMAIL'])
-
-    test_seq = ProteinSequence(name='P00334', sequence=
-    'MSFTLTNKNVIFVAGLGGIGLDTSKELLKRDLKNLVILDRIENPAAIAELKAINPKVTVT'
-    'FYPYDVTVPIAETTKLLKTIFAQLKTVDVLINGAGILDDHQIERTIAVNYTGLVNTTTAI'
-    'LDFWDKRKGGPGGIICNIGSVTGFNAIYQVPVYSGTKAAVVNFTSSLAKLAPITGVTAYT'
-    'VNPGITRTTLVHKFNSWLDVEPQVAEKLLAHPTQPSLACAENFVKAIELNQNGAIWKLDL'
-    'GTLEAIQWTKHWDSGI'
-                          )
-

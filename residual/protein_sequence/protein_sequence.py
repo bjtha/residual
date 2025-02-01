@@ -14,6 +14,7 @@ class ProteinSequence:
     def __init__(self, name: str, sequence: str):
         self.name = name
         self.sequence = sequence
+        self.metadata = dict()
 
     def __len__(self):
         return len(self.sequence)

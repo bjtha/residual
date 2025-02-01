@@ -1,6 +1,10 @@
-def url_maker(base_url: str):
+class ExtendableUrl:
 
-    def join_url(*args) -> str:
-        return '/'.join(str(item) for item in [base_url, *args])
+    def __init__(self, __base_url: str, /):
+        self._url = __base_url
 
-    return join_url
+    def __truediv__(self, other):
+        return ExtendableUrl('/'.join([self._url, str(other)]))
+
+    def __repr__(self):
+        return self._url
