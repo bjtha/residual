@@ -1,5 +1,3 @@
-from enum import Enum, auto
-
 class ExtendableUrl:
 
     def __init__(self, __base_url: str, /):
@@ -10,8 +8,3 @@ class ExtendableUrl:
 
     def __repr__(self):
         return self._url
-
-
-class RequestResult(Enum):
-    SUCCESS = auto()
-    FAILURE = auto()

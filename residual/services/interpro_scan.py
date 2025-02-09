@@ -7,7 +7,6 @@ from loguru import logger
 
 from residual.protein_sequence import ProteinSequence, Feature, GoTerm
 from residual.services import ServiceBaseClass, register_service
-from residual.utils import RequestResult
 
 @register_service
 class InterProScan(ServiceBaseClass):
@@ -19,16 +18,13 @@ class InterProScan(ServiceBaseClass):
         super().__init__()
         self.user_email = user_email
 
-    def name(self) -> str:
-        return 'ips5'
-
     async def _submit_sequence(self,
                                session: aiohttp.ClientSession,
                                seq: ProteinSequence,
-                               ) -> (RequestResult, str):
+                               ) -> dict:
 
         """
-        Sends request for a given sequence to the InterProScan API.
+        Sends request for a given sequence to the InterProScan API, waits for the result and returns it.
         """
 
         payload = {
@@ -46,7 +42,7 @@ class InterProScan(ServiceBaseClass):
                 async with session.post('run', data=payload) as res:
                     res.raise_for_status()
                     job_id = await res.text()
-                    return RequestResult.SUCCESS, job_id
+                    return await self._retrieve_results(session, job_id)
 
             except aiohttp.ClientResponseError as e:
                 logger.error(f'HTTP Error {e.status}: {e.message} (Attempt {attempt} of {retries})')
@@ -56,13 +52,13 @@ class InterProScan(ServiceBaseClass):
                 else:  # Client-side error
                     break
 
-        return RequestResult.FAILURE, ''
+        return {}
 
     async def _retrieve_results(self,
                                 session: aiohttp.ClientSession,
                                 job_id: str,
                                 check_delay: int = 1,
-                                ) -> (RequestResult, dict):
+                                ) -> dict:
 
         """
         Fetch results for a job.
@@ -82,7 +78,7 @@ class InterProScan(ServiceBaseClass):
                     status = await res.text()
             except aiohttp.ClientResponseError as e:
                 logger.error(f'HTTP Error {e.status}: {e.message}')
-                return RequestResult.FAILURE, {}
+                return {}
 
             if status != 'FINISHED':
                 await asyncio.sleep(check_delay)
@@ -92,7 +88,7 @@ class InterProScan(ServiceBaseClass):
         async with session.get(f'result/{job_id}/json') as res:
             res.raise_for_status()
             job_data = await res.json()
-            return RequestResult.SUCCESS, job_data
+            return job_data
 
     async def _scan_sequence(self,
                              seq: ProteinSequence,
@@ -112,15 +108,10 @@ class InterProScan(ServiceBaseClass):
 
         async with semaphore:
             logger.info(f'{seq.name}: Scanning now...')
-
-            result, job_id = await self._submit_sequence(session, seq)
-            if result == RequestResult.FAILURE:
+            data = await self._submit_sequence(session, seq)
+            if not data:
+                logger.error('No data returned from job.')
                 return
-
-            result, data = await self._retrieve_results(session, job_id)
-            if result == RequestResult.FAILURE:
-                return
-
             seq.features += parse_iprscan_data(data)
 
         logger.info(f'{seq.name}: Scan finished.')
