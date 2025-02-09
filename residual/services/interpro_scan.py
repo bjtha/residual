@@ -1,10 +1,11 @@
 import asyncio
+
 import aiohttp
 from typing import Iterable
 
 from loguru import logger
 
-from residual.protein_sequence import ProteinSequence
+from residual.protein_sequence import ProteinSequence, Feature, GoTerm
 from residual.services import ServiceBaseClass, register_service
 from residual.utils import RequestResult
 
@@ -66,7 +67,7 @@ class InterProScan(ServiceBaseClass):
         """
         Fetch results for a job.
 
-        :param job_id: id of the job, provided at time of submission.
+        :param job_id: id of the job, provided at submission.
         :param check_delay: how long in seconds to wait between checking job status.
         :return: dictionary containing json data.
         :raises: HTTPError if a problem with the status checking or data retrieval.
@@ -92,44 +93,6 @@ class InterProScan(ServiceBaseClass):
             res.raise_for_status()
             job_data = await res.json()
             return RequestResult.SUCCESS, job_data
-
-
-    def _apply_data(self, seq: ProteinSequence, data: dict) -> None:
-
-        """
-        Extract desired data from the API result and add to the ProteinSequence.
-
-        :param seq: original ProteinSequences
-        :param data: result from scan
-        :return:
-        """
-
-        matches = [match for match in data['results'][0]['matches'] if match['signature']['entry'] is not None]
-
-        result = {}
-        for match in matches:
-            ipr_name = match['signature']['entry']['accession']
-            description = match['signature']['entry']['description']
-
-            go_terms = {}
-            for match_go in match['signature']['entry']['goXRefs']:
-                go_terms[match_go['id']] = {
-                    'name': match_go['name'],
-                    'category': match_go['category']
-                }
-
-            locations = []
-            for match_loc in match['locations']:
-                locations.append(
-                    (match_loc['start'], match_loc['end'])
-                )
-
-            result[ipr_name] = {'description': description,
-                                'go_terms': go_terms,
-                                'locations': locations,}
-
-        seq.metadata[self.name()] = result
-
 
     async def _scan_sequence(self,
                              seq: ProteinSequence,
@@ -158,7 +121,7 @@ class InterProScan(ServiceBaseClass):
             if result == RequestResult.FAILURE:
                 return
 
-            self._apply_data(seq, data)
+            seq.features += parse_iprscan_data(data)
 
         logger.info(f'{seq.name}: Scan finished.')
 
@@ -179,3 +142,43 @@ class InterProScan(ServiceBaseClass):
 
         logger.info('InterProScan run complete')
         return list(sequences)
+
+
+def compose_name(data: dict) -> str | None:
+    """Forms feature name from data; returns None if not enough information to give a meaningful name."""
+
+    accession = data.get('accession')
+    elements = [e for e in map(data.get, ('description', 'name')) if e not in (None, accession)]
+    return elements[0] if elements else None
+
+
+def collect_go_terms(data: dict) -> list[GoTerm | None]:
+    go_terms = []
+    if go_refs := data.get('goXRefs'):
+        for ref in go_refs:
+            if 'databaseName' in ref: ref.pop('databaseName')
+            go_terms.append(GoTerm(**ref))
+    return go_terms
+
+
+def parse_match(match: dict) -> Feature | None:
+    """Parses a single InterProScan match into a feature. Collects all GO terms and locations into the feature,
+    but prefers descriptions given by the IPR database entry over signature descriptions."""
+
+    go_terms = collect_go_terms(match)
+    locations = [(loc['start'], loc['end']) for loc in match['locations']]
+
+    signature = match['signature']
+    name = compose_name(signature)
+
+    if entry := signature.get('entry'):  # Replace signature-level description with entry if one's available.
+        name = compose_name(entry) or name
+        go_terms += collect_go_terms(entry)
+
+    return Feature('iprscan5', name, locations, go_terms) if name else None
+
+
+def parse_iprscan_data(data: dict) -> list[Feature]:
+    """Parses response from an InterProScan job into a list of Features."""
+
+    return [ft for ft in map(parse_match, data['results'][0]['matches']) if ft is not None]

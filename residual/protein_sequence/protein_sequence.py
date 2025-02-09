@@ -1,7 +1,5 @@
-from dataclasses import dataclass, field
-
 from residual.protein_sequence.descriptors import AminoAcidSequence
-
+from residual.protein_sequence.feature import Feature
 
 class ProteinSequence:
 
@@ -14,7 +12,7 @@ class ProteinSequence:
     def __init__(self, name: str, sequence: str):
         self.name = name
         self.sequence = sequence
-        self.metadata = dict()
+        self.features: list[Feature | None] = []
 
     def __len__(self):
         return len(self.sequence)
