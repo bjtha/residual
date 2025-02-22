@@ -8,11 +8,57 @@ from loguru import logger
 from residual.protein_sequence import ProteinSequence, Feature, GoTerm
 from residual.services import ServiceBaseClass, register_service
 
+
+class MatchParser:
+
+    @staticmethod
+    def _compose_name(data: dict) -> str | None:
+        """Forms feature name from data; returns None if not enough information to give a meaningful name."""
+
+        accession = data.get('accession')
+        elements = [e for e in map(data.get, ('description', 'name')) if e not in (None, accession)]
+        return elements[0] if elements else None
+
+    @staticmethod
+    def _collect_go_terms(data: dict) -> list[GoTerm | None]:
+        go_terms = []
+        if go_refs := data.get('goXRefs'):
+            for ref in go_refs:
+                if 'databaseName' in ref: ref.pop('databaseName')
+                go_terms.append(GoTerm(**ref))
+        return go_terms
+
+    def _parse_match(self, match: dict) -> Feature | None:
+        """Parses a single InterProScan match into a feature. Collects all GO terms and locations into the feature,
+        but prefers descriptions given by the IPR database entry over signature descriptions."""
+
+        go_terms = self._collect_go_terms(match)
+        locations = [(loc['start'], loc['end']) for loc in match['locations']]
+
+        signature = match['signature']
+        name = self._compose_name(signature)
+
+        if entry := signature.get('entry'):  # Replace signature-level description with entry if one's available.
+            name = self._compose_name(entry) or name
+            go_terms += self._collect_go_terms(entry)
+
+        return Feature('iprscan5', name, locations, go_terms) if name else None
+
+    def _parse_iprscan_data(self, data: dict) -> list[Feature]:
+        """Parses response from an InterProScan job into a list of Features."""
+
+        return [ft for ft in map(self._parse_match, data['results'][0]['matches']) if ft is not None]
+
+    def __call__(self, __match: dict, /):
+        return self._parse_iprscan_data(__match)
+
+
 @register_service
 class InterProScan(ServiceBaseClass):
 
     base_url = 'https://www.ebi.ac.uk/Tools/services/rest/iprscan5/'
     max_jobs = 30
+    parser = MatchParser()
 
     def __init__(self, user_email: str):
         super().__init__()
@@ -112,7 +158,7 @@ class InterProScan(ServiceBaseClass):
             if not data:
                 logger.error('No data returned from job.')
                 return
-            seq.features += parse_iprscan_data(data)
+            seq.features += self.parser(data)
 
         logger.info(f'{seq.name}: Scan finished.')
 
@@ -135,41 +181,3 @@ class InterProScan(ServiceBaseClass):
         return list(sequences)
 
 
-def compose_name(data: dict) -> str | None:
-    """Forms feature name from data; returns None if not enough information to give a meaningful name."""
-
-    accession = data.get('accession')
-    elements = [e for e in map(data.get, ('description', 'name')) if e not in (None, accession)]
-    return elements[0] if elements else None
-
-
-def collect_go_terms(data: dict) -> list[GoTerm | None]:
-    go_terms = []
-    if go_refs := data.get('goXRefs'):
-        for ref in go_refs:
-            if 'databaseName' in ref: ref.pop('databaseName')
-            go_terms.append(GoTerm(**ref))
-    return go_terms
-
-
-def parse_match(match: dict) -> Feature | None:
-    """Parses a single InterProScan match into a feature. Collects all GO terms and locations into the feature,
-    but prefers descriptions given by the IPR database entry over signature descriptions."""
-
-    go_terms = collect_go_terms(match)
-    locations = [(loc['start'], loc['end']) for loc in match['locations']]
-
-    signature = match['signature']
-    name = compose_name(signature)
-
-    if entry := signature.get('entry'):  # Replace signature-level description with entry if one's available.
-        name = compose_name(entry) or name
-        go_terms += collect_go_terms(entry)
-
-    return Feature('iprscan5', name, locations, go_terms) if name else None
-
-
-def parse_iprscan_data(data: dict) -> list[Feature]:
-    """Parses response from an InterProScan job into a list of Features."""
-
-    return [ft for ft in map(parse_match, data['results'][0]['matches']) if ft is not None]
