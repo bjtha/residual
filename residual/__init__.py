@@ -1,1 +1,1 @@
-from surveyor import Surveyor
+from residual.surveyor import Surveyor

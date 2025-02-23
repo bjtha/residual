@@ -3,11 +3,11 @@ from itertools import count
 
 from loguru import logger
 
-from residual.protein_sequence import ProteinSequence
+from residual.protein_sequence import ProteinSequence, SequenceDisplay
 from residual.services.base_class import service_registry
 
 class Surveyor:
-    """Loads protein sequences and runs services against them."""
+    """Loads protein sequences, runs services against them and writes out the result."""
 
     def __init__(self, user_email: str) -> None:
         self.user_email = user_email
@@ -89,9 +89,15 @@ class Surveyor:
 
         print(f'{len(self.sequences)} total sequences loaded.')
 
+    def write_out(self, filename: str) -> None:
+        with open(filename, 'w') as file:
+            for seq in self.sequences.values():
+                display = SequenceDisplay(seq)
+                file.write(display())
+                file.write('\n')
 
-    def run(self) -> None:
-
+    def run(self, outfile: str) -> None:
         for name, service_cls in service_registry.items():
             service = service_cls(self.user_email)
             service.run(self.sequences.values())
+        self.write_out(filename=outfile)
