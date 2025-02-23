@@ -37,9 +37,9 @@ class Surveyor:
         seq_lines = []
 
         for line in lines:
-            if line.startswith('>'):
+            if line.startswith('>'):  # File is read in reverse, so header represents the end of a sequence.
                 name = line.lstrip('>')
-                sequence = ''.join(seq_lines)
+                sequence = ''.join(seq_lines)  # Join accumulated sequence lines.
                 try:
                     self.sequences[name] = ProteinSequence(name, sequence)
                 except ValueError as e:
@@ -48,7 +48,7 @@ class Surveyor:
                 finally:
                     seq_lines = []
             else:
-                seq_lines.insert(0, line)
+                seq_lines.insert(0, line)  # If not a header, accumulate the sequence line.
 
         logger.info(f'{len(self.sequences)} total sequences loaded.')
 
@@ -90,6 +90,9 @@ class Surveyor:
         print(f'{len(self.sequences)} total sequences loaded.')
 
     def write_out(self, filename: str) -> None:
+
+        """Generate a representation of all sequences with their features tabulated and write to a file."""
+
         with open(filename, 'w') as file:
             for seq in self.sequences.values():
                 display = SequenceDisplay(seq)
@@ -97,6 +100,9 @@ class Surveyor:
                 file.write('\n')
 
     def run(self, outfile: str) -> None:
+
+        """Run each service in turn against the loaded protein sequences and write out the results."""
+
         for name, service_cls in service_registry.items():
             service = service_cls(self.user_email)
             service.run(self.sequences.values())
